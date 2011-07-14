@@ -12,7 +12,8 @@ use base qw(Exporter);
 
 @EXPORT = qw(readauthinfo writeauthinfo as_string);
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
+our $wildcard = 'ANY';
 our $authinfofile = $ENV{'HOME'} . '/.authinfo';
 
 
@@ -40,11 +41,15 @@ sub readauthinfo {
         chomp $line;
         $csv->parse($line);
         my %l = $csv->fields();
+        # this package requires at least these fields to be on a valid
+        # line:
         if (defined($l{'machine'}) &&
-            defined($l{'port'})    &&
             defined($l{'login'})   &&
             defined($l{'password'})) {
-            $ai->{$l{'machine'}}->{$l{'port'}}->{$l{'login'}} = $l{'password'};
+            # allow port to be defined or ANY
+            my $port = $wildcard;
+            $port = $l{'port'} if (defined($l{'port'}));
+            $ai->{$l{'machine'}}->{$port}->{$l{'login'}} = $l{'password'};
         } else {
             carp "$line missing some fields? skipping";
             next LINE;
@@ -59,6 +64,18 @@ sub readauthinfo {
 }
 
 
+sub getauth() {
+
+    my $self    = shift;
+    my $machine = shift || croak 'use: getauth(machine,login,[port])';
+    my $login   = shift || croak 'use: getauth(machine,login,[port])';
+    my $port    = shift || $wildcard;
+
+    # retval may be undef
+    return $self->{AUTHINFO}->{$machine}->{$port}->{$login};
+}
+
+
 sub as_string {
     my $self = shift;
 
@@ -68,7 +85,9 @@ sub as_string {
             for my $login (keys %{$self->{AUTHINFO}->{$machine}->{$port}}) {
                 my $pass = $self->{AUTHINFO}->{$machine}->{$port}->{$login};
                 $c .= 'machine ' . $machine . ' login ' . $login .
-                    ' password ' . $pass . ' port ' . $port . "\n";
+                    ' password ' . $pass;
+                $c .= ' port ' . $port if ($port ne $wildcard);
+                $c .= "\n";
             }
         }
     }
@@ -121,18 +140,27 @@ Version 0.01
 
 This package should be considered new and untested. Please use at your own risk.
 
+=head1 CAVEATS
+
+Users should note that authinfo files are without a formal
+specification. I have referred to resources that claim authority, particularly
+
+http://www.gnu.org/software/emacs/manual/html_node/gnus/NNTP.html
+
+(see "nntp-authinfo-function")
+
+It should be noted that this library supports a subset of files as described
+here, not arbitrary key/value pairs as hinted at in the description provided
+by gnu.org.
+
 =head1 SYNOPSIS
 
   use Text::Authinfo;
 
   my $a = Text::Authinfo->new();
   my $read_success = $a->readauthinfo();
-  print $a->{FILE};
-  if (defined($a->{AUTHINFO}->{'example.com'}->{'9090'}->{'myname'})) {
-      my $password =
-          $a->{AUTHINFO}->{'example.com'}->{'9090'}->{'myname'};
-  }
   print $a->as_string();
+  my $pw = $a->getauth('machine.example.com','me@example.com','9999');
   my $write_success = $a->writeauthinfo();
 
 =head1 PACKAGE VARIABLES
@@ -184,6 +212,19 @@ Note! this function will overwrite your existing authinfo file. This can
 be dangerous! Keep backups.
 
 The file written will have mode 0600 applied.
+
+=head2 getauth
+
+  my $pw = $a->getauth('machine.example.com','me@example.com','9999');
+
+  my $pw = $a->getauth('machine.example.com','me@example.com');
+
+This function retrieves your password. The required arguments are determined
+by the contents of the line for each auth. If a port was mandated, you must
+pass that in as the third parameter as in the first example above. Otherwise,
+if the auth line in question did not contain a port, do not pass one in here.
+
+This function returns undef if no match is found.
 
 =head1 AUTHOR
 
